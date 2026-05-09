@@ -32,7 +32,8 @@
       "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 27936)",
-      "Bash(curl -s -o d:/code/ever-photo/backend/outputs/api_final.png -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)"
+      "Bash(curl -s -o d:/code/ever-photo/backend/outputs/api_final.png -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
+      "Bash(git ls-remote *)"
     ],
     "additionalDirectories": [
       "\\tmp\\basicsr-1.4.2",
