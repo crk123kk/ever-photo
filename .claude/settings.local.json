@@ -1,0 +1,42 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip --version)",
+      "Bash(npm --version)",
+      "Bash(nvidia-smi)",
+      "Bash(pip install *)",
+      "Bash(pip index *)",
+      "Bash(python -c \"import torch; print\\(f'torch={torch.__version__}, cuda={torch.cuda.is_available\\(\\)}'\\)\")",
+      "Bash(git --version)",
+      "Bash(pip download *)",
+      "Bash(cd /tmp/basicsr-1.4.2 && pip install -e . -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | tail -20)",
+      "Read(//tmp/**)",
+      "Bash(sed -i 's/tb-nightly/tensorboard/' /tmp/basicsr-1.4.2/requirements.txt && pip install -e /tmp/basicsr-1.4.2 -i https://pypi.tuna.tsinghua.edu.cn/simple 2>&1 | tail -15)",
+      "Bash(python -c \"from setuptools.build_meta import build_wheel; print\\('OK'\\)\")",
+      "Bash(python -c \"from gfpgan import GFPGANer; from realesrgan import RealESRGANer; from simple_lama_inpainting import SimpleLama; print\\('All models importable'\\)\")",
+      "Bash(npx create-next-app@latest frontend --typescript --tailwind --eslint --app --src-dir --no-turbopack --import-alias \"@/*\" --use-npm)",
+      "Bash(python -c \"from app.main import app; print\\('FastAPI app created successfully'\\)\")",
+      "Bash(python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 120)",
+      "Bash(curl -s http://localhost:8000/api/health)",
+      "Bash(python -c ' *)",
+      "Bash(curl -s -o d:/code/ever-photo/backend/uploads/test_output.jpg -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test.jpg\" http://localhost:8000/api/restore)",
+      "Bash(curl -s -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test.jpg\" http://localhost:8000/api/restore)",
+      "Bash(rm -f \"C:/Users/WINDOWS/.cache/torch/hub/checkpoints/big-lama.pt\" 2>/dev/null; echo \"Deleted corrupted model\")",
+      "Bash(rm -f d:/code/ever-photo/backend/weights/RealESRGAN_x2plus.pth)",
+      "Bash(FORCE_CPU=1 python -c ' *)",
+      "Bash(curl -s -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
+      "Bash(pkill -f \"uvicorn app.main:app\")",
+      "Bash(python -c \"from app.core.config import DEVICE; print\\(f'Detected device: {DEVICE}'\\)\")",
+      "Bash(curl -s -o d:/code/ever-photo/backend/outputs/api_test.png -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
+      "Bash(curl -s -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8001/api/restore)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
+      "Bash(netstat -ano)",
+      "Bash(taskkill //F //PID 27936)",
+      "Bash(curl -s -o d:/code/ever-photo/backend/outputs/api_final.png -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)"
+    ],
+    "additionalDirectories": [
+      "\\tmp\\basicsr-1.4.2",
+      "C:\\Users\\WINDOWS\\.cache\\torch\\hub\\checkpoints"
+    ]
+  }
+}

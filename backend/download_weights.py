@@ -1,0 +1,103 @@
+"""Download model weights from HuggingFace (with China mirror support).
+
+Usage:
+    python download_weights.py              # Download all available weights
+    HF_ENDPOINT=https://hf-mirror.com python download_weights.py  # Use China mirror
+"""
+import os
+
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+
+from huggingface_hub import hf_hub_download
+
+WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights")
+
+# HuggingFace sources - all verified to have correct model architecture
+HF_WEIGHTS = {
+    "GFPGANv1.4.pth": ("th3w33knd/GFPGANv1.4", "GFPGANv1.4.pth"),
+}
+
+# GitHub sources - need direct access (may require proxy in China)
+GITHUB_WEIGHTS = {
+    "RealESRGAN_x2.pth": (
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+        "RealESRGAN_x2plus.pth",
+    ),
+    "big-lama.pt": (
+        "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt",
+        "big-lama.pt",
+    ),
+}
+
+
+def download_hf():
+    for name, (repo_id, filename) in HF_WEIGHTS.items():
+        target = os.path.join(WEIGHTS_DIR, name)
+        if os.path.exists(target):
+            size_mb = os.path.getsize(target) / 1024 / 1024
+            print(f"[skip] {name} ({size_mb:.1f} MB)")
+            continue
+        print(f"[download] {name} from {repo_id} ...")
+        try:
+            hf_hub_download(repo_id, filename, local_dir=WEIGHTS_DIR)
+            size_mb = os.path.getsize(target) / 1024 / 1024
+            print(f"  -> {size_mb:.1f} MB")
+        except Exception as e:
+            print(f"  FAILED: {e}")
+
+
+def download_github():
+    import torch
+
+    for name, (url, remote_name) in GITHUB_WEIGHTS.items():
+        target = os.path.join(WEIGHTS_DIR, name)
+        if os.path.exists(target):
+            size_mb = os.path.getsize(target) / 1024 / 1024
+            print(f"[skip] {name} ({size_mb:.1f} MB)")
+            continue
+        print(f"[download] {name} from GitHub ...")
+        print(f"  URL: {url}")
+        print(f"  Note: If download fails, try using a proxy or download manually.")
+        try:
+            torch.hub.download_url_to_file(url, target)
+            size_mb = os.path.getsize(target) / 1024 / 1024
+            if size_mb < 10:
+                print(f"  WARNING: File seems too small ({size_mb:.1f} MB), download may have failed")
+                os.remove(target)
+            else:
+                print(f"  -> {size_mb:.1f} MB")
+        except Exception as e:
+            print(f"  FAILED: {e}")
+            if os.path.exists(target):
+                os.remove(target)
+
+
+def setup_lama_cache():
+    lama_src = os.path.join(WEIGHTS_DIR, "big-lama.pt")
+    lama_dst = os.path.expanduser("~/.cache/torch/hub/checkpoints/big-lama.pt")
+    if os.path.exists(lama_src) and not os.path.exists(lama_dst):
+        os.makedirs(os.path.dirname(lama_dst), exist_ok=True)
+        import shutil
+        shutil.copy2(lama_src, lama_dst)
+        print(f"Copied big-lama.pt to torch hub cache")
+
+
+if __name__ == "__main__":
+    os.makedirs(WEIGHTS_DIR, exist_ok=True)
+
+    print("=== Downloading from HuggingFace ===")
+    download_hf()
+
+    print("\n=== Downloading from GitHub ===")
+    download_github()
+
+    print("\n=== Setting up cache ===")
+    setup_lama_cache()
+
+    print("\nDone!")
+    print(f"\nWeights directory: {WEIGHTS_DIR}")
+    print("Available files:")
+    for f in os.listdir(WEIGHTS_DIR):
+        if f.endswith((".pth", ".pt")):
+            size_mb = os.path.getsize(os.path.join(WEIGHTS_DIR, f)) / 1024 / 1024
+            print(f"  {f} ({size_mb:.1f} MB)")

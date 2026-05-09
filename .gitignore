@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Model weights & temp files
+backend/weights/
+backend/uploads/
+backend/outputs/
+
+# Node
+node_modules/
+.next/
+out/
+
+# Environment
+.env
+*.log
+
+# OS
+Thumbs.db
+.DS_Store
