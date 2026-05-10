@@ -1,6 +1,8 @@
 import logging
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Optional
 
 import cv2
 import numpy as np
@@ -8,10 +10,10 @@ import torch
 from PIL import Image
 
 from app.core.config import (
+    CODEFORMER_WEIGHT,
     DEVICE,
     GFPGAN_WEIGHT,
     OUTPUT_DIR,
-    REALESRGAN_SCALE,
     REALESRGAN_WEIGHT,
     SCRATCH_KERNEL_SIZE,
     SCRATCH_THRESHOLD,
@@ -19,6 +21,8 @@ from app.core.config import (
 )
 
 logger = logging.getLogger(__name__)
+
+ProgressCallback = Callable[[int, float, str], None]
 
 # HuggingFace sources (accessible via hf-mirror.com)
 HF_WEIGHTS = {
@@ -46,11 +50,22 @@ def _ensure_weight(path: Path) -> Path:
     return path
 
 
+@dataclass
+class RestoreParams:
+    scratch_enabled: bool = True
+    scratch_threshold: int = SCRATCH_THRESHOLD
+    scratch_kernel_size: int = SCRATCH_KERNEL_SIZE
+    face_enabled: bool = True
+    fidelity_weight: float = 0.5
+    upscale_enabled: bool = True
+    upscale_factor: int = 2
+
+
 class RestorePipeline:
     def __init__(self):
         self.device = torch.device(DEVICE)
         self._lama = None
-        self._face_restorer = None
+        self._face_restorer = None  # (type_str, model) or None
         self._upsampler = None
 
     # ---- lazy loaders ----
@@ -65,16 +80,52 @@ class RestorePipeline:
     def _load_face_restorer(self):
         if self._face_restorer is not None:
             return
-        from gfpgan import GFPGANer
 
-        _ensure_weight(GFPGAN_WEIGHT)
-        self._face_restorer = GFPGANer(
-            model_path=str(GFPGAN_WEIGHT),
-            upscale=1,
-            arch="clean",
-            channel_multiplier=2,
-            device=self.device,
-        )
+        # Try CodeFormer first (supports fidelity_weight)
+        try:
+            from basicsr.archs.codeformer_arch import CodeFormer as CodeFormerArch
+            from facexlib.utils.face_restoration_helper import FaceRestoreHelper
+
+            if CODEFORMER_WEIGHT.exists():
+                codeformer = CodeFormerArch(
+                    dim_embd=512,
+                    codebook_size=1024,
+                    n_head=8,
+                    n_layers=9,
+                    connect_list=["32", "64", "128", "256"],
+                ).to(self.device)
+
+                ckpt = torch.load(str(CODEFORMER_WEIGHT), map_location=self.device, weights_only=False)
+                if "params_ema" in ckpt:
+                    codeformer.load_state_dict(ckpt["params_ema"])
+                elif "params" in ckpt:
+                    codeformer.load_state_dict(ckpt["params"])
+                else:
+                    codeformer.load_state_dict(ckpt)
+                codeformer.eval()
+
+                self._face_restorer = ("codeformer", codeformer)
+                logger.info("CodeFormer loaded from %s", CODEFORMER_WEIGHT)
+                return
+        except Exception as e:
+            logger.debug("CodeFormer not available (%s), trying GFPGAN", e)
+
+        # Fallback to GFPGAN
+        try:
+            from gfpgan import GFPGANer
+
+            _ensure_weight(GFPGAN_WEIGHT)
+            gfpgan = GFPGANer(
+                model_path=str(GFPGAN_WEIGHT),
+                upscale=1,
+                arch="clean",
+                channel_multiplier=2,
+                device=self.device,
+            )
+            self._face_restorer = ("gfpgan", gfpgan)
+            logger.info("GFPGAN loaded from %s", GFPGAN_WEIGHT)
+        except Exception as e:
+            logger.warning("No face restorer available (%s)", e)
 
     def _load_upsampler(self):
         if self._upsampler is not None:
@@ -92,10 +143,10 @@ class RestorePipeline:
                 num_feat=64,
                 num_block=23,
                 num_grow_ch=32,
-                scale=REALESRGAN_SCALE,
+                scale=2,
             )
             self._upsampler = RealESRGANer(
-                scale=REALESRGAN_SCALE,
+                scale=2,
                 model_path=str(REALESRGAN_WEIGHT),
                 model=model,
                 tile=400,
@@ -103,23 +154,26 @@ class RestorePipeline:
                 pre_pad=0,
                 half=self.device.type == "cuda",
             )
+            logger.info("Real-ESRGAN loaded from %s", REALESRGAN_WEIGHT)
         except Exception as e:
             logger.warning("Real-ESRGAN unavailable (%s), will use cv2.resize", e)
 
     # ---- processing steps ----
 
     @staticmethod
-    def detect_scratches(img: np.ndarray) -> np.ndarray:
+    def detect_scratches(
+        img: np.ndarray,
+        threshold: int = SCRATCH_THRESHOLD,
+        kernel_size: int = SCRATCH_KERNEL_SIZE,
+    ) -> np.ndarray:
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         kernel = cv2.getStructuringElement(
-            cv2.MORPH_RECT, (SCRATCH_KERNEL_SIZE, SCRATCH_KERNEL_SIZE)
+            cv2.MORPH_RECT, (kernel_size, kernel_size)
         )
         tophat = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kernel)
         blackhat = cv2.morphologyEx(gray, cv2.MORPH_BLACKHAT, kernel)
         combined = cv2.add(tophat, blackhat)
-        _, mask = cv2.threshold(
-            combined, SCRATCH_THRESHOLD, 255, cv2.THRESH_BINARY
-        )
+        _, mask = cv2.threshold(combined, threshold, 255, cv2.THRESH_BINARY)
         dilate_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         mask = cv2.dilate(mask, dilate_kernel, iterations=1)
         return mask
@@ -135,55 +189,130 @@ class RestorePipeline:
             logger.warning("LaMa unavailable (%s), using OpenCV inpainting", e)
             return cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
 
-    def restore_faces(self, img: np.ndarray) -> np.ndarray:
+    def restore_faces(self, img: np.ndarray, fidelity_weight: float = 0.5) -> np.ndarray:
         try:
             self._load_face_restorer()
-            _, _, output = self._face_restorer.enhance(
-                img, has_aligned=False, only_center_face=False, paste_back=True
-            )
-            if output is not None:
-                return output
+            if self._face_restorer is None:
+                return img
+
+            restorer_type, restorer = self._face_restorer
+
+            if restorer_type == "codeformer":
+                from facexlib.utils.face_restoration_helper import FaceRestoreHelper
+
+                face_helper = FaceRestoreHelper(
+                    upscale_factor=1,
+                    face_size=512,
+                    crop_ratio=(1, 1),
+                    det_model="retinaface_resnet50",
+                    save_ext="png",
+                    use_parse=True,
+                    device=self.device,
+                )
+                face_helper.clean_all()
+                face_helper.read_image(img)
+                face_helper.get_face_landmarks_5(only_center_face=False, resize=640, eye_dist_threshold=5)
+                face_helper.align_warp_face()
+
+                for cropped_face in face_helper.cropped_faces:
+                    cropped_face_t = torch.from_numpy(cropped_face).permute(2, 0, 1).float() / 255.0
+                    cropped_face_t = cropped_face_t.unsqueeze(0).to(self.device)
+                    with torch.no_grad():
+                        output = restorer(cropped_face_t, w=fidelity_weight)[0]
+                        output = (output.squeeze(0).permute(1, 2, 0) * 255.0).cpu().numpy()
+                    output = output.clip(0, 255).astype("uint8")
+                    face_helper.add_restored_face(output)
+
+                face_helper.get_inverse_affine(None)
+                restored_img = face_helper.paste_faces_to_input_image()
+                face_helper.clean_all()
+                return restored_img
+            else:
+                # GFPGAN
+                _, _, output = restorer.enhance(
+                    img, has_aligned=False, only_center_face=False, paste_back=True
+                )
+                if output is not None:
+                    return output
         except Exception as e:
             logger.warning("Face restoration failed (%s), using original", e)
         return img
 
-    def upscale(self, img: np.ndarray) -> np.ndarray:
+    def upscale(self, img: np.ndarray, scale: int = 2) -> np.ndarray:
         try:
             self._load_upsampler()
             if self._upsampler is not None:
-                output, _ = self._upsampler.enhance(img, outscale=REALESRGAN_SCALE)
+                output, _ = self._upsampler.enhance(img, outscale=scale)
                 return output
         except Exception as e:
             logger.warning("Real-ESRGAN failed (%s), using cv2.resize", e)
         h, w = img.shape[:2]
-        return cv2.resize(
-            img, (w * REALESRGAN_SCALE, h * REALESRGAN_SCALE),
-            interpolation=cv2.INTER_LANCZOS4,
-        )
+        return cv2.resize(img, (w * scale, h * scale), interpolation=cv2.INTER_LANCZOS4)
 
     # ---- main entry ----
 
-    def restore(self, input_path: str, output_path: str) -> str:
+    def restore(
+        self,
+        input_path: str,
+        output_path: str,
+        params: Optional[RestoreParams] = None,
+        progress_cb: Optional[ProgressCallback] = None,
+    ) -> str:
+        if params is None:
+            params = RestoreParams()
+
         img = cv2.imread(input_path, cv2.IMREAD_COLOR)
         if img is None:
             raise ValueError(f"Cannot read image: {input_path}")
 
-        logger.info("Step 1/3: Scratch detection + inpainting")
-        mask = self.detect_scratches(img)
-        scratch_ratio = mask.sum() / (mask.shape[0] * mask.shape[1]) / 255
-        if 0.001 < scratch_ratio < 0.3:
-            logger.info("Scratches detected (%.1f%%), running inpainting", scratch_ratio * 100)
-            img = self.inpaint_scratches(img, mask)
+        # Step 1: Scratch detection + inpainting
+        if params.scratch_enabled:
+            if progress_cb:
+                progress_cb(1, 0.1, "Scratch detection")
+            logger.info("Step 1/3: Scratch detection + inpainting")
+            mask = self.detect_scratches(
+                img,
+                threshold=params.scratch_threshold,
+                kernel_size=params.scratch_kernel_size,
+            )
+            scratch_ratio = mask.sum() / (mask.shape[0] * mask.shape[1]) / 255
+            if 0.001 < scratch_ratio < 0.3:
+                logger.info("Scratches detected (%.1f%%), running inpainting", scratch_ratio * 100)
+                if progress_cb:
+                    progress_cb(1, 0.2, "Inpainting scratches")
+                img = self.inpaint_scratches(img, mask)
+            else:
+                logger.info("No significant scratches detected, skipping inpainting")
         else:
-            logger.info("No significant scratches detected, skipping inpainting")
+            logger.info("Step 1/3: Scratch detection skipped")
+            if progress_cb:
+                progress_cb(1, 0.33, "Scratch step skipped")
 
-        logger.info("Step 2/3: Face restoration")
-        img = self.restore_faces(img)
+        # Step 2: Face restoration
+        if params.face_enabled:
+            if progress_cb:
+                progress_cb(2, 0.4, "Face restoration")
+            logger.info("Step 2/3: Face restoration")
+            img = self.restore_faces(img, fidelity_weight=params.fidelity_weight)
+        else:
+            logger.info("Step 2/3: Face restoration skipped")
+            if progress_cb:
+                progress_cb(2, 0.66, "Face step skipped")
 
-        logger.info("Step 3/3: Super resolution (%dx)", REALESRGAN_SCALE)
-        img = self.upscale(img)
+        # Step 3: Super resolution
+        if params.upscale_enabled:
+            if progress_cb:
+                progress_cb(3, 0.7, "Super resolution")
+            logger.info("Step 3/3: Super resolution (%dx)", params.upscale_factor)
+            img = self.upscale(img, scale=params.upscale_factor)
+        else:
+            logger.info("Step 3/3: Super resolution skipped")
+            if progress_cb:
+                progress_cb(3, 0.95, "Upscale step skipped")
 
         cv2.imwrite(output_path, img)
+        if progress_cb:
+            progress_cb(3, 1.0, "Complete")
         logger.info("Done: %s", output_path)
         return output_path
 

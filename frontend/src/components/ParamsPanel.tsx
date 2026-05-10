@@ -1,0 +1,196 @@
+"use client";
+
+export interface Params {
+  scratch_enabled: boolean;
+  scratch_threshold: number;
+  scratch_kernel_size: number;
+  face_enabled: boolean;
+  fidelity_weight: number;
+  upscale_enabled: boolean;
+  upscale_factor: number;
+}
+
+interface ParamsPanelProps {
+  params: Params;
+  onChange: (params: Params) => void;
+  onStart: () => void;
+  onPickFile: () => void;
+  onDownload: () => void;
+  state: "idle" | "ready" | "processing" | "done" | "error";
+}
+
+function Hint({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mt-1 text-[11px] leading-snug text-gray-400">{children}</p>
+  );
+}
+
+export default function ParamsPanel({
+  params,
+  onChange,
+  onStart,
+  onPickFile,
+  onDownload,
+  state,
+}: ParamsPanelProps) {
+  const update = (key: keyof Params, value: Params[keyof Params]) =>
+    onChange({ ...params, [key]: value });
+
+  const isProcessing = state === "processing";
+  const hasResult = state === "done";
+  const hasFile = state !== "idle";
+
+  return (
+    <div className="w-full space-y-5">
+      {/* Section: Scratch */}
+      <fieldset className="space-y-3">
+        <div className="flex items-center justify-between">
+          <legend className="text-sm font-medium text-gray-700">划痕修复</legend>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={params.scratch_enabled}
+              onChange={(e) => update("scratch_enabled", e.target.checked)}
+              disabled={isProcessing}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-gray-200 peer-checked:bg-blue-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-disabled:opacity-50" />
+          </label>
+        </div>
+        {params.scratch_enabled && (
+          <label className="block pl-0.5">
+            <span className="text-xs text-gray-500">
+              灵敏度 <span className="tabular-nums">{params.scratch_threshold}</span>
+            </span>
+            <input
+              type="range"
+              min={1}
+              max={50}
+              value={params.scratch_threshold}
+              onChange={(e) =>
+                update("scratch_threshold", Number(e.target.value))
+              }
+              disabled={isProcessing}
+              className="w-full mt-1.5 accent-blue-600 disabled:opacity-50"
+            />
+            <Hint>
+              值越小检测越灵敏，会识别更多细微划痕；值越大只检测明显损伤。调低可能误检纹理细节，调高可能漏检细小划痕。
+            </Hint>
+          </label>
+        )}
+      </fieldset>
+
+      {/* Section: Face */}
+      <fieldset className="space-y-3">
+        <div className="flex items-center justify-between">
+          <legend className="text-sm font-medium text-gray-700">人脸修复</legend>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={params.face_enabled}
+              onChange={(e) => update("face_enabled", e.target.checked)}
+              disabled={isProcessing}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-gray-200 peer-checked:bg-blue-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-disabled:opacity-50" />
+          </label>
+        </div>
+        {params.face_enabled && (
+          <label className="block pl-0.5">
+            <span className="text-xs text-gray-500">
+              保真度 <span className="tabular-nums">{params.fidelity_weight.toFixed(2)}</span>
+            </span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={params.fidelity_weight}
+              onChange={(e) =>
+                update("fidelity_weight", Number(e.target.value))
+              }
+              disabled={isProcessing}
+              className="w-full mt-1.5 accent-blue-600 disabled:opacity-50"
+            />
+            <Hint>
+              0 = 最大程度保留原貌，修复保守；1 = 最大程度增强，面部更清晰。低值适合轻微受损，高值适合严重模糊。
+            </Hint>
+          </label>
+        )}
+      </fieldset>
+
+      {/* Section: Upscale */}
+      <fieldset className="space-y-3">
+        <div className="flex items-center justify-between">
+          <legend className="text-sm font-medium text-gray-700">超分辨率</legend>
+          <label className="relative inline-flex items-center cursor-pointer">
+            <input
+              type="checkbox"
+              checked={params.upscale_enabled}
+              onChange={(e) => update("upscale_enabled", e.target.checked)}
+              disabled={isProcessing}
+              className="sr-only peer"
+            />
+            <div className="w-9 h-5 bg-gray-200 peer-checked:bg-blue-600 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-disabled:opacity-50" />
+          </label>
+        </div>
+        {params.upscale_enabled && (
+          <div className="pl-0.5 space-y-1.5">
+            <div className="flex gap-2">
+              {[2, 4].map((factor) => (
+                <button
+                  key={factor}
+                  onClick={() => update("upscale_factor", factor)}
+                  disabled={isProcessing}
+                  className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
+                    params.upscale_factor === factor
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  {factor}x
+                </button>
+              ))}
+            </div>
+            <Hint>
+              2x 放大 2 倍，速度快，适合一般用途；4x 放大 4 倍，细节更丰富但处理时间更长、输出文件更大。
+            </Hint>
+          </div>
+        )}
+      </fieldset>
+
+      {/* Divider */}
+      <div className="border-t border-gray-100" />
+
+      {/* Actions: always visible */}
+      <div className="space-y-2.5">
+        <button
+          onClick={onStart}
+          disabled={!hasFile || isProcessing}
+          className="w-full px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:bg-blue-400 disabled:cursor-not-allowed transition-colors font-medium text-base"
+        >
+          {isProcessing ? "修复中..." : hasResult ? "重新修复" : "开始修复"}
+        </button>
+
+        {hasResult && (
+          <button
+            onClick={onDownload}
+            className="w-full px-6 py-2.5 bg-white border border-blue-600 text-blue-600 rounded-lg hover:bg-blue-50 transition-colors font-medium flex items-center justify-center gap-2"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
+            下载修复结果
+          </button>
+        )}
+
+        <button
+          onClick={onPickFile}
+          className="w-full px-6 py-2 text-sm text-gray-500 hover:text-gray-700 transition-colors"
+        >
+          {hasFile ? "选择其他照片" : "选择照片"}
+        </button>
+      </div>
+    </div>
+  );
+}

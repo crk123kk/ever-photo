@@ -12,17 +12,25 @@ OUTPUT_DIR.mkdir(exist_ok=True)
 WEIGHTS_DIR.mkdir(exist_ok=True)
 
 def _detect_device() -> str:
+    import logging
+    logger = logging.getLogger(__name__)
     if os.environ.get("FORCE_CPU") == "1":
+        logger.info("FORCE_CPU=1, using CPU")
         return "cpu"
     try:
         import torch
         if torch.cuda.is_available():
-            # Verify CUDA actually works (RTX 5070 Blackwell needs sm_120 support)
             try:
                 t = torch.zeros(1, device="cuda")
                 del t
+                logger.info("CUDA available and working, using GPU")
                 return "cuda"
             except RuntimeError:
+                logger.warning(
+                    "CUDA reported available but tensor allocation failed "
+                    "(likely missing sm_120 support for RTX 5070 Blackwell). "
+                    "Falling back to CPU. Install PyTorch with cu128+ support."
+                )
                 return "cpu"
     except ImportError:
         pass
@@ -36,7 +44,10 @@ GFPGAN_WEIGHT = WEIGHTS_DIR / "GFPGANv1.4.pth"
 
 # Real-ESRGAN
 REALESRGAN_SCALE = 2
-REALESRGAN_WEIGHT = WEIGHTS_DIR / "RealESRGAN_x2.pth"
+REALESRGAN_WEIGHT = WEIGHTS_DIR / "RealESRGAN_x2plus.pth"
+
+# CodeFormer
+CODEFORMER_WEIGHT = WEIGHTS_DIR / "codeformer.pth"
 
 # Scratch detection
 SCRATCH_THRESHOLD = 10  # 顶帽变换阈值，越小检测越灵敏
