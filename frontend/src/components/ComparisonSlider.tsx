@@ -81,29 +81,11 @@ export default function ComparisonSlider({
         />
       </div>
 
-      {/* Divider line + handle */}
+      {/* Divider line */}
       <div
-        className="absolute top-0 bottom-0 w-0.5 bg-white shadow-lg pointer-events-none"
+        className={`absolute top-0 bottom-0 w-px bg-white shadow pointer-events-none transition-opacity duration-300 ${dragging ? "opacity-100" : "opacity-50"}`}
         style={{ left: `${position}%` }}
-      >
-        <div
-          className={`absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 bg-white rounded-full shadow-md flex items-center justify-center transition-transform ${dragging ? "scale-110" : ""}`}
-        >
-          <svg
-            className="w-4 h-4 text-gray-600"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M8 9l-3 3 3 3m8-6l3 3-3 3"
-            />
-          </svg>
-        </div>
-      </div>
+      />
 
       {/* Labels */}
       <span className="absolute top-3 left-3 bg-black/50 text-white text-xs px-2 py-1 rounded pointer-events-none">

@@ -306,8 +306,7 @@ export default function ParamsPanel({
       </fieldset>
 
       {/* Divider */}
-      <div className="border-t border-gray-100" />
-
+      
       {/* Actions: always visible */}
       <div className="space-y-2.5">
         <button
