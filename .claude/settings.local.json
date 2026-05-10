@@ -33,7 +33,20 @@
       "Bash(netstat -ano)",
       "Bash(taskkill //F //PID 27936)",
       "Bash(curl -s -o d:/code/ever-photo/backend/outputs/api_final.png -w \"%{http_code}\" -X POST -F \"file=@d:/code/ever-photo/backend/uploads/test_face.jpg\" http://localhost:8000/api/restore)",
-      "Bash(git ls-remote *)"
+      "Bash(git ls-remote *)",
+      "Bash(git count-objects *)",
+      "Bash(git rev-list *)",
+      "Bash(git cat-file *)",
+      "Bash(awk '/^blob/ {print $3, $4}')",
+      "Bash(git commit --amend -m ' *)",
+      "Bash(git reflog *)",
+      "Bash(git gc *)",
+      "Bash(git verify-pack *)",
+      "Bash(awk '{if\\($3>1000000\\) print $3, $1}')",
+      "Bash(pip show *)",
+      "Bash(git filter-repo *)",
+      "Bash(git remote *)",
+      "Bash(git push *)"
     ],
     "additionalDirectories": [
       "\\tmp\\basicsr-1.4.2",
