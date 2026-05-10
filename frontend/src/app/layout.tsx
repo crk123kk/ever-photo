@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Ever Photo - AI 照片修复",
-  description: "AI 驱动的老照片修复工具",
+  title: "Ever Photo - 旧日时光",
+  description: "旧日时光",
 };
 
 export default function RootLayout({

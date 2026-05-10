@@ -7,14 +7,21 @@ from typing import Callable, Optional
 import cv2
 import numpy as np
 import torch
+import torch.nn.functional as F
 from PIL import Image
 
 from app.core.config import (
     CODEFORMER_WEIGHT,
+    DDCOLOR_WEIGHT,
+    DENOISE_STRENGTH,
+    COLORIZE_STRENGTH,
     DEVICE,
     GFPGAN_WEIGHT,
     OUTPUT_DIR,
     REALESRGAN_WEIGHT,
+    RESTORMER_DEBLUR_DEFOCUS_WEIGHT,
+    RESTORMER_DEBLUR_MOTION_WEIGHT,
+    RESTORMER_DENOISE_WEIGHT,
     SCRATCH_KERNEL_SIZE,
     SCRATCH_THRESHOLD,
     WEIGHTS_DIR,
@@ -27,6 +34,11 @@ ProgressCallback = Callable[[int, float, str], None]
 # HuggingFace sources (accessible via hf-mirror.com)
 HF_WEIGHTS = {
     "GFPGANv1.4.pth": ("th3w33knd/GFPGANv1.4", "GFPGANv1.4.pth"),
+    # Restormer
+    "real_denoising.pth": ("deepinv/Restormer", "real_denoising.pth"),
+    "single_image_defocus_deblurring.pth": ("deepinv/Restormer", "single_image_defocus_deblurring.pth"),
+    # DDColor
+    "ddcolor_paper_tiny.pt": ("piddnad/ddcolor_paper_tiny", "pytorch_model.bin"),
 }
 
 
@@ -45,6 +57,10 @@ def _ensure_weight(path: Path) -> Path:
     from huggingface_hub import hf_hub_download
 
     hf_hub_download(repo_id, filename, local_dir=str(WEIGHTS_DIR))
+    # If remote filename differs from local name, rename
+    downloaded = WEIGHTS_DIR / filename
+    if downloaded.exists() and not path.exists():
+        downloaded.rename(path)
     if not path.exists():
         raise FileNotFoundError(f"Download failed for {name}")
     return path
@@ -52,12 +68,26 @@ def _ensure_weight(path: Path) -> Path:
 
 @dataclass
 class RestoreParams:
+    # Denoise/Deblur (Step 1)
+    denoise_enabled: bool = False
+    denoise_task: str = "denoise"  # "denoise" | "deblur_motion" | "deblur_defocus"
+    denoise_strength: float = DENOISE_STRENGTH
+
+    # Scratch detection + inpainting (Step 2)
     scratch_enabled: bool = True
     scratch_threshold: int = SCRATCH_THRESHOLD
     scratch_kernel_size: int = SCRATCH_KERNEL_SIZE
+
+    # Face restoration (Step 3)
     face_enabled: bool = True
     face_model: str = "gfpgan"  # "gfpgan" or "codeformer"
     fidelity_weight: float = 0.5
+
+    # Colorization (Step 4)
+    colorize_enabled: bool = False
+    colorize_strength: float = COLORIZE_STRENGTH
+
+    # Super resolution (Step 5)
     upscale_enabled: bool = True
     upscale_factor: int = 2
 
@@ -65,12 +95,91 @@ class RestoreParams:
 class RestorePipeline:
     def __init__(self):
         self.device = torch.device(DEVICE)
+        self._restormer = None
+        self._restormer_task = None
         self._lama = None
         self._gfpgan = None
         self._codeformer = None
+        self._ddcolor = None
         self._upsampler = None
 
     # ---- lazy loaders ----
+
+    def _load_restormer(self, task: str = "denoise"):
+        if self._restormer is not None and self._restormer_task == task:
+            return
+        try:
+            from app.models.restormer_arch import Restormer
+
+            task_config = {
+                "denoise": (RESTORMER_DENOISE_WEIGHT, "BiasFree"),
+                "deblur_motion": (RESTORMER_DEBLUR_MOTION_WEIGHT, "WithBias"),
+                "deblur_defocus": (RESTORMER_DEBLUR_DEFOCUS_WEIGHT, "WithBias"),
+            }
+            weight_path, layer_norm_type = task_config[task]
+
+            _ensure_weight(weight_path)
+
+            parameters = {
+                "inp_channels": 3,
+                "out_channels": 3,
+                "dim": 48,
+                "num_blocks": [4, 6, 6, 8],
+                "num_refinement_blocks": 4,
+                "heads": [1, 2, 4, 8],
+                "ffn_expansion_factor": 2.66,
+                "bias": False,
+                "LayerNorm_type": layer_norm_type,
+                "dual_pixel_task": False,
+            }
+
+            model = Restormer(**parameters)
+            checkpoint = torch.load(str(weight_path), map_location=self.device, weights_only=False)
+            model.load_state_dict(checkpoint["params"])
+            model = model.to(self.device)
+            model.eval()
+
+            if self._restormer is not None:
+                del self._restormer
+                if self.device.type == "cuda":
+                    torch.cuda.empty_cache()
+
+            self._restormer = model
+            self._restormer_task = task
+            logger.info("Restormer loaded for task '%s' from %s", task, weight_path)
+        except Exception as e:
+            logger.warning("Restormer unavailable (%s)", e)
+
+    def _load_ddcolor(self):
+        if self._ddcolor is not None:
+            return
+        try:
+            from app.models.ddcolor.model import DDColor
+
+            _ensure_weight(DDCOLOR_WEIGHT)
+
+            model = DDColor(
+                encoder_name="convnext-t",
+                decoder_name="MultiScaleColorDecoder",
+                input_size=[256, 256],
+                num_output_channels=2,
+                last_norm="Spectral",
+                do_normalize=False,
+                num_queries=100,
+                num_scales=3,
+                dec_layers=9,
+            )
+
+            ckpt = torch.load(str(DDCOLOR_WEIGHT), map_location="cpu", weights_only=False)
+            state_dict = ckpt["params"] if isinstance(ckpt, dict) and "params" in ckpt else ckpt
+            model.load_state_dict(state_dict, strict=False)
+            model = model.to(self.device)
+            model.eval()
+
+            self._ddcolor = model
+            logger.info("DDColor loaded from %s", DDCOLOR_WEIGHT)
+        except Exception as e:
+            logger.warning("DDColor unavailable (%s)", e)
 
     def _load_lama(self):
         if self._lama is not None:
@@ -161,6 +270,40 @@ class RestorePipeline:
 
     # ---- processing steps ----
 
+    def denoise_deblur(self, img: np.ndarray, task: str = "denoise", strength: float = 0.5) -> np.ndarray:
+        try:
+            self._load_restormer(task)
+            if self._restormer is None:
+                return img
+
+            img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            h, w = img.shape[:2]
+            img_tensor = torch.from_numpy(img_rgb).float().div(255.0).permute(2, 0, 1).unsqueeze(0).to(self.device)
+
+            # Pad to multiple of 8
+            pad_h = (8 - h % 8) % 8
+            pad_w = (8 - w % 8) % 8
+            if pad_h > 0 or pad_w > 0:
+                img_tensor = F.pad(img_tensor, (0, pad_w, 0, pad_h), "reflect")
+
+            with torch.no_grad():
+                restored = self._restormer(img_tensor)
+
+            restored = restored[:, :, :h, :w]
+            restored = torch.clamp(restored, 0, 1)
+
+            # Strength blending
+            if strength < 1.0:
+                blended = img_tensor[:, :, :h, :w] * (1 - strength) + restored * strength
+            else:
+                blended = restored
+
+            result = (blended.squeeze(0).permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
+            return cv2.cvtColor(result, cv2.COLOR_RGB2BGR)
+        except Exception as e:
+            logger.warning("Restormer denoise/deblur failed (%s)", e)
+            return img
+
     @staticmethod
     def detect_scratches(
         img: np.ndarray,
@@ -195,7 +338,6 @@ class RestorePipeline:
             result = self._restore_faces_codeformer(img, fidelity_weight)
             if result is not None:
                 return result
-            # Fallback to GFPGAN if CodeFormer failed
             logger.info("CodeFormer failed or unavailable, falling back to GFPGAN")
 
         return self._restore_faces_gfpgan(img)
@@ -253,6 +395,59 @@ class RestorePipeline:
             logger.warning("CodeFormer face restoration failed (%s)", e)
             return None
 
+    def colorize(self, img: np.ndarray, strength: float = 1.0) -> np.ndarray:
+        try:
+            self._load_ddcolor()
+            if self._ddcolor is None:
+                return img
+
+            img_float = img.astype(np.float32) / 255.0
+
+            # Extract original L channel
+            img_lab = cv2.cvtColor(img_float, cv2.COLOR_BGR2LAB)
+            original_l = img_lab[:, :, 0:1]
+            original_ab = img_lab[:, :, 1:3]
+
+            h, w = img.shape[:2]
+            input_size = 256
+
+            # Resize for model input
+            img_resized = cv2.resize(img_float, (input_size, input_size))
+            img_lab_resized = cv2.cvtColor(img_resized, cv2.COLOR_BGR2LAB)
+            img_l_resized = img_lab_resized[:, :, 0]
+
+            # Grayscale RGB: L channel + zero A + zero B
+            zeros = np.zeros_like(img_lab_resized[:, :, 1])
+            gray_lab = np.stack([img_l_resized, zeros, zeros], axis=-1)
+            gray_rgb = cv2.cvtColor(gray_lab.astype(np.float32), cv2.COLOR_LAB2RGB)
+
+            tensor_gray = torch.from_numpy(gray_rgb).permute(2, 0, 1).unsqueeze(0).float().to(self.device)
+
+            with torch.no_grad():
+                output_ab = self._ddcolor(tensor_gray)
+
+            # Resize predicted AB back to original resolution
+            output_ab_resized = F.interpolate(output_ab, size=(h, w), mode="bilinear", align_corners=False)
+            output_ab_np = output_ab_resized.squeeze(0).permute(1, 2, 0).cpu().float().numpy()
+
+            # Scale AB from [-1,1] to [-128,127] (Lab convention)
+            predicted_ab = output_ab_np * 128
+
+            # Strength blending in Lab space
+            if strength < 1.0:
+                blended_ab = original_ab * (1 - strength) + predicted_ab * strength
+            else:
+                blended_ab = predicted_ab
+
+            predicted_lab = np.concatenate([original_l, blended_ab], axis=-1)
+            predicted_lab = np.clip(predicted_lab, 0, 255).astype(np.uint8)
+            result = cv2.cvtColor(predicted_lab, cv2.COLOR_LAB2BGR)
+
+            return result
+        except Exception as e:
+            logger.warning("DDColor colorization failed (%s)", e)
+            return img
+
     def upscale(self, img: np.ndarray, scale: int = 2) -> np.ndarray:
         try:
             self._load_upsampler()
@@ -280,11 +475,22 @@ class RestorePipeline:
         if img is None:
             raise ValueError(f"Cannot read image: {input_path}")
 
-        # Step 1: Scratch detection + inpainting
+        # Step 1: Denoise/Deblur
+        if params.denoise_enabled:
+            if progress_cb:
+                progress_cb(1, 0.05, "Denoise/Deblur")
+            logger.info("Step 1/5: Denoise/Deblur (task=%s, strength=%.2f)", params.denoise_task, params.denoise_strength)
+            img = self.denoise_deblur(img, task=params.denoise_task, strength=params.denoise_strength)
+        else:
+            logger.info("Step 1/5: Denoise/Deblur skipped")
+            if progress_cb:
+                progress_cb(1, 0.15, "Denoise step skipped")
+
+        # Step 2: Scratch detection + inpainting
         if params.scratch_enabled:
             if progress_cb:
-                progress_cb(1, 0.1, "Scratch detection")
-            logger.info("Step 1/3: Scratch detection + inpainting")
+                progress_cb(2, 0.15, "Scratch detection")
+            logger.info("Step 2/5: Scratch detection + inpainting")
             mask = self.detect_scratches(
                 img,
                 threshold=params.scratch_threshold,
@@ -294,40 +500,51 @@ class RestorePipeline:
             if 0.001 < scratch_ratio < 0.3:
                 logger.info("Scratches detected (%.1f%%), running inpainting", scratch_ratio * 100)
                 if progress_cb:
-                    progress_cb(1, 0.2, "Inpainting scratches")
+                    progress_cb(2, 0.25, "Inpainting scratches")
                 img = self.inpaint_scratches(img, mask)
             else:
                 logger.info("No significant scratches detected, skipping inpainting")
         else:
-            logger.info("Step 1/3: Scratch detection skipped")
+            logger.info("Step 2/5: Scratch detection skipped")
             if progress_cb:
-                progress_cb(1, 0.33, "Scratch step skipped")
+                progress_cb(2, 0.30, "Scratch step skipped")
 
-        # Step 2: Face restoration
+        # Step 3: Face restoration
         if params.face_enabled:
             if progress_cb:
-                progress_cb(2, 0.4, "Face restoration")
-            logger.info("Step 2/3: Face restoration")
+                progress_cb(3, 0.35, "Face restoration")
+            logger.info("Step 3/5: Face restoration")
             img = self.restore_faces(img, face_model=params.face_model, fidelity_weight=params.fidelity_weight)
         else:
-            logger.info("Step 2/3: Face restoration skipped")
+            logger.info("Step 3/5: Face restoration skipped")
             if progress_cb:
-                progress_cb(2, 0.66, "Face step skipped")
+                progress_cb(3, 0.45, "Face step skipped")
 
-        # Step 3: Super resolution
+        # Step 4: Colorization
+        if params.colorize_enabled:
+            if progress_cb:
+                progress_cb(4, 0.50, "Colorization")
+            logger.info("Step 4/5: Colorization (strength=%.2f)", params.colorize_strength)
+            img = self.colorize(img, strength=params.colorize_strength)
+        else:
+            logger.info("Step 4/5: Colorization skipped")
+            if progress_cb:
+                progress_cb(4, 0.60, "Colorize step skipped")
+
+        # Step 5: Super resolution
         if params.upscale_enabled:
             if progress_cb:
-                progress_cb(3, 0.7, "Super resolution")
-            logger.info("Step 3/3: Super resolution (%dx)", params.upscale_factor)
+                progress_cb(5, 0.65, "Super resolution")
+            logger.info("Step 5/5: Super resolution (%dx)", params.upscale_factor)
             img = self.upscale(img, scale=params.upscale_factor)
         else:
-            logger.info("Step 3/3: Super resolution skipped")
+            logger.info("Step 5/5: Super resolution skipped")
             if progress_cb:
-                progress_cb(3, 0.95, "Upscale step skipped")
+                progress_cb(5, 0.90, "Upscale step skipped")
 
         cv2.imwrite(output_path, img)
         if progress_cb:
-            progress_cb(3, 1.0, "Complete")
+            progress_cb(5, 1.0, "Complete")
         logger.info("Done: %s", output_path)
         return output_path
 

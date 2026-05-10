@@ -18,6 +18,11 @@ WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights"
 # HuggingFace sources - China-friendly via HF_ENDPOINT mirror
 HF_WEIGHTS = {
     "GFPGANv1.4.pth": ("th3w33knd/GFPGANv1.4", "GFPGANv1.4.pth"),
+    # Restormer
+    "real_denoising.pth": ("deepinv/Restormer", "real_denoising.pth"),
+    "single_image_defocus_deblurring.pth": ("deepinv/Restormer", "single_image_defocus_deblurring.pth"),
+    # DDColor
+    "ddcolor_paper_tiny.pt": ("piddnad/ddcolor_paper_tiny", "pytorch_model.bin"),
 }
 
 # GitHub / direct sources - may require proxy in China
@@ -34,6 +39,10 @@ GITHUB_WEIGHTS = {
         "https://github.com/sczhou/CodeFormer/releases/download/v0.1.0/codeformer.pth",
         "codeformer.pth",
     ),
+    "motion_deblurring.pth": (
+        "https://github.com/swz30/Restormer/releases/download/v1.0/motion_deblurring.pth",
+        "motion_deblurring.pth",
+    ),
 }
 
 
@@ -47,6 +56,11 @@ def download_hf():
         print(f"[download] {name} from {repo_id} ...")
         try:
             hf_hub_download(repo_id, filename, local_dir=WEIGHTS_DIR)
+            # If remote filename differs from local name, rename
+            if name != filename:
+                tmp = os.path.join(WEIGHTS_DIR, filename)
+                if os.path.exists(tmp) and not os.path.exists(target):
+                    os.rename(tmp, target)
             size_mb = os.path.getsize(target) / 1024 / 1024
             print(f"  -> {size_mb:.1f} MB")
         except Exception as e:

@@ -57,7 +57,20 @@
       "WebSearch",
       "Bash(python -c \"import codeformer; print\\(dir\\(codeformer\\)\\); print\\(codeformer.__file__\\)\")",
       "Bash(ls \"C:/Users/WINDOWS/AppData/Local/Programs/Python/Python312/Lib/site-packages/codeformer/\")",
-      "Read(//c/Users/WINDOWS/AppData/Local/Programs/Python/Python312/Lib/site-packages/codeformer/**)"
+      "Read(//c/Users/WINDOWS/AppData/Local/Programs/Python/Python312/Lib/site-packages/codeformer/**)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:arxiv.org)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(mkdir -p d:/code/ever-photo/backend/app/models/ddcolor_arch_utils)",
+      "Bash(mkdir -p d:/code/ever-photo/backend/app/models/ddcolor)",
+      "Bash(npx next *)",
+      "Bash(python -c \"from app.services.pipeline import RestorePipeline, RestoreParams; p = RestoreParams\\(\\); print\\('RestoreParams OK:', p\\); print\\('denoise_enabled:', p.denoise_enabled, 'colorize_enabled:', p.colorize_enabled\\)\")",
+      "Bash(timeout 10 python -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(taskkill //PID 28276 //F)",
+      "Bash(python -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(taskkill //PID 18992 //F)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)"
     ],
     "additionalDirectories": [
       "\\tmp\\basicsr-1.4.2",

@@ -8,12 +8,17 @@ import ParamsPanel, { type Params } from "@/components/ParamsPanel";
 type AppState = "idle" | "processing" | "done" | "error";
 
 const DEFAULT_PARAMS: Params = {
+  denoise_enabled: false,
+  denoise_task: "denoise",
+  denoise_strength: 0.5,
   scratch_enabled: true,
   scratch_threshold: 10,
   scratch_kernel_size: 15,
   face_enabled: true,
   face_model: "gfpgan",
   fidelity_weight: 0.5,
+  colorize_enabled: false,
+  colorize_strength: 1.0,
   upscale_enabled: true,
   upscale_factor: 2,
 };
@@ -125,7 +130,7 @@ export default function Home() {
     <div className="flex flex-col flex-1 bg-gradient-to-b from-gray-50 to-white">
       <header className="w-full py-8 text-center">
         <h1 className="text-3xl font-bold text-gray-900">Ever Photo</h1>
-        <p className="mt-2 text-gray-500">AI 驱动的老照片修复工具</p>
+        <p className="mt-2 text-gray-500">旧日时光</p>
       </header>
 
       <main className="w-full max-w-6xl mx-auto px-4 pb-16 flex-1">

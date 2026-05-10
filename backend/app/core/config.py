@@ -52,3 +52,13 @@ CODEFORMER_WEIGHT = WEIGHTS_DIR / "codeformer.pth"
 # Scratch detection
 SCRATCH_THRESHOLD = 10  # 顶帽变换阈值，越小检测越灵敏
 SCRATCH_KERNEL_SIZE = 15  # 形态学核大小
+
+# Restormer (Denoise/Deblur)
+RESTORMER_DENOISE_WEIGHT = WEIGHTS_DIR / "real_denoising.pth"
+RESTORMER_DEBLUR_MOTION_WEIGHT = WEIGHTS_DIR / "motion_deblurring.pth"
+RESTORMER_DEBLUR_DEFOCUS_WEIGHT = WEIGHTS_DIR / "single_image_defocus_deblurring.pth"
+DENOISE_STRENGTH = 0.5
+
+# DDColor (Colorization)
+DDCOLOR_WEIGHT = WEIGHTS_DIR / "ddcolor_paper_tiny.pt"
+COLORIZE_STRENGTH = 1.0
