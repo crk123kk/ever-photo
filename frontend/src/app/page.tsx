@@ -12,6 +12,7 @@ const DEFAULT_PARAMS: Params = {
   scratch_threshold: 10,
   scratch_kernel_size: 15,
   face_enabled: true,
+  face_model: "gfpgan",
   fidelity_weight: 0.5,
   upscale_enabled: true,
   upscale_factor: 2,

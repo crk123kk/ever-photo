@@ -5,6 +5,7 @@ export interface Params {
   scratch_threshold: number;
   scratch_kernel_size: number;
   face_enabled: boolean;
+  face_model: "gfpgan" | "codeformer";
   fidelity_weight: number;
   upscale_enabled: boolean;
   upscale_factor: number;
@@ -96,26 +97,62 @@ export default function ParamsPanel({
           </label>
         </div>
         {params.face_enabled && (
-          <label className="block pl-0.5">
-            <span className="text-xs text-gray-500">
-              保真度 <span className="tabular-nums">{params.fidelity_weight.toFixed(2)}</span>
-            </span>
-            <input
-              type="range"
-              min={0}
-              max={1}
-              step={0.05}
-              value={params.fidelity_weight}
-              onChange={(e) =>
-                update("fidelity_weight", Number(e.target.value))
-              }
-              disabled={isProcessing}
-              className="w-full mt-1.5 accent-blue-600 disabled:opacity-50"
-            />
-            <Hint>
-              0 = 最大程度保留原貌，修复保守；1 = 最大程度增强，面部更清晰。低值适合轻微受损，高值适合严重模糊。
-            </Hint>
-          </label>
+          <div className="pl-0.5 space-y-3">
+            <div className="space-y-1.5">
+              <span className="text-xs text-gray-500">修复模型</span>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => update("face_model", "gfpgan")}
+                  disabled={isProcessing}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                    params.face_model === "gfpgan"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  GFPGAN
+                </button>
+                <button
+                  onClick={() => update("face_model", "codeformer")}
+                  disabled={isProcessing}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-50 ${
+                    params.face_model === "codeformer"
+                      ? "bg-blue-600 text-white"
+                      : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                  }`}
+                >
+                  CodeFormer
+                </button>
+              </div>
+              <Hint>
+                {params.face_model === "gfpgan"
+                  ? "GFPGAN 效果稳定自然，适合大多数老照片。"
+                  : "CodeFormer 支持保真度调节，0.5 以下偏保守，适合需精细控制的场景。"}
+              </Hint>
+            </div>
+            <label className="block">
+              <span className="text-xs text-gray-500">
+                保真度 <span className="tabular-nums">{params.fidelity_weight.toFixed(2)}</span>
+              </span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={params.fidelity_weight}
+                onChange={(e) =>
+                  update("fidelity_weight", Number(e.target.value))
+                }
+                disabled={isProcessing}
+                className="w-full mt-1.5 accent-blue-600 disabled:opacity-50"
+              />
+              <Hint>
+                {params.face_model === "codeformer"
+                  ? "0 = 最大程度保留原貌，修复保守；1 = 最大程度增强，面部更清晰。建议 0.3 以下。"
+                  : "保真度仅在使用 CodeFormer 时生效。"}
+              </Hint>
+            </label>
+          </div>
         )}
       </fieldset>
 

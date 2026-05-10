@@ -7,6 +7,8 @@ Usage:
 import os
 import sys
 
+import requests
+
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
 
 from huggingface_hub import hf_hub_download
@@ -16,11 +18,14 @@ WEIGHTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "weights"
 # HuggingFace sources - China-friendly via HF_ENDPOINT mirror
 HF_WEIGHTS = {
     "GFPGANv1.4.pth": ("th3w33knd/GFPGANv1.4", "GFPGANv1.4.pth"),
-    "RealESRGAN_x2plus.pth": ("ai-forever/Real-ESRGAN", "RealESRGAN_x2plus.pth"),
 }
 
-# GitHub sources - need direct access (may require proxy in China)
+# GitHub / direct sources - may require proxy in China
 GITHUB_WEIGHTS = {
+    "RealESRGAN_x2plus.pth": (
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.1/RealESRGAN_x2plus.pth",
+        "RealESRGAN_x2plus.pth",
+    ),
     "big-lama.pt": (
         "https://github.com/enesmsahin/simple-lama-inpainting/releases/download/v0.1.0/big-lama.pt",
         "big-lama.pt",
@@ -49,8 +54,6 @@ def download_hf():
 
 
 def download_github():
-    import requests
-
     for name, (url, remote_name) in GITHUB_WEIGHTS.items():
         target = os.path.join(WEIGHTS_DIR, name)
         if os.path.exists(target):
